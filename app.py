@@ -3,57 +3,49 @@ import pandas as pd
 import pdfplumber
 import requests
 
-# --- PLATFORM BRANDING ---
 st.set_page_config(page_title="Moneyplan Advisory Platform", layout="wide")
 
 st.sidebar.title("Moneyplan Financial Services")
 st.sidebar.write("**Advisor:** Sachin Thorat")
 st.sidebar.markdown("---")
 
-# --- 1. THE LIVE DATA ENGINE (API FIXED) ---
-@st.cache_data(ttl=86400) # Caches data for 24 hours so it stays lightning fast
+# --- 1. THE LIVE DATA ENGINE (TIMEOUT INCREASED) ---
+@st.cache_data(ttl=86400)
 def get_all_indian_mutual_funds():
-    # We add a "User-Agent" so the API thinks this is a normal Chrome browser and doesn't block us
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        response = requests.get("https://api.mfapi.in/mf", headers=headers, timeout=10)
-        response.raise_for_status() # Checks for errors
+        # Increased timeout to 30 seconds to handle the massive 40,000+ fund list
+        response = requests.get("https://api.mfapi.in/mf", headers=headers, timeout=30)
+        response.raise_for_status() 
         data = response.json()
         return {item['schemeName']: item['schemeCode'] for item in data}
     except Exception as e:
-        # Graceful Fallback: If the API server is ever down, the app uses this list instead of crashing
-        return {
-            "Parag Parikh Flexi Cap Fund": 122639,
-            "Nippon India Small Cap Fund": 118778,
-            "Canara Robeco Mid Cap Fund": 147824,
-            "Kotak Midcap Fund": 120152,
-            "Motilal Oswal Nifty India Defence": 147888
-        }
+        return {"Error: Could not load AMFI database": 0}
 
-with st.spinner("Connecting to Live AMFI Database..."):
+with st.spinner("Connecting to AMFI Live Database (Fetching 40,000+ schemes)..."):
     all_funds_db = get_all_indian_mutual_funds()
     all_fund_names = list(all_funds_db.keys())
 
-# --- 2. INTERNAL OVERLAP & RETURN DATABASE ---
-# In production, this data comes from your AMC CSV downloads
-moneyplan_recommended_funds = {
+# --- 2. INTERNAL HOLDINGS DATABASE (For Overlap) ---
+# You will update this list manually with your AMC CSV downloads
+master_holdings_db = {
+    "Canara Robeco Mid Cap Fund": {"TVS Motor Company": 3.2, "Bharat Electronics": 2.8, "Indian Hotels": 2.5},
+    "Kotak Midcap Fund": {"Supreme Industries": 3.5, "Cummins India": 2.8, "Bharat Electronics": 2.1},
     "Parag Parikh Flexi Cap Fund": {"HDFC Bank": 7.5, "Bajaj Holdings": 6.2, "ITC": 5.8},
     "Nippon India Small Cap Fund": {"Tube Investments": 3.1, "HDFC Bank": 1.2, "KPIT Tech": 2.5}
 }
 
-client_existing_db = {
-    "Canara Robeco Mid Cap Fund": {"TVS Motor Company": 3.2, "Bharat Electronics": 2.8, "Indian Hotels": 2.5},
-    "Kotak Midcap Fund": {"Supreme Industries": 3.5, "Cummins India": 2.8, "Bharat Electronics": 2.1}
-}
+# Helper function to prevent app from crashing if a fund's holdings aren't in our database yet
+def get_fund_holdings(fund_name):
+    # If we have the exact data, use it
+    for known_fund in master_holdings_db.keys():
+        if known_fund.lower() in str(fund_name).lower():
+            return master_holdings_db[known_fund], True
+            
+    # If we don't have the data, return a generic placeholder so the app doesn't break
+    return {"HDFC Bank (Placeholder)": 5.0, "Reliance (Placeholder)": 4.0, "ICICI (Placeholder)": 3.0}, False
 
-historical_cagr_db = {
-    "Canara Robeco Mid Cap Fund": 18.5,
-    "Kotak Midcap Fund": 16.2,
-    "Parag Parikh Flexi Cap Fund": 21.4,
-    "Nippon India Small Cap Fund": 26.8
-}
-
-# --- 3. THE PDF PROCESSING ENGINE (RESTORED) ---
+# --- 3. THE PDF PROCESSING ENGINE ---
 def process_client_pdf(uploaded_file):
     extracted_funds = []
     with pdfplumber.open(uploaded_file) as pdf:
@@ -75,7 +67,6 @@ def process_client_pdf(uploaded_file):
 st.sidebar.markdown("### Client Data Input")
 uploaded_pdf = st.sidebar.file_uploader("Upload CAS PDF", type=["pdf"])
 
-# Store extracted funds in session memory
 if 'extracted_portfolio' not in st.session_state:
     st.session_state.extracted_portfolio = []
 
@@ -89,12 +80,11 @@ if uploaded_pdf is not None:
 st.title("Comprehensive Portfolio Review")
 
 if not st.session_state.extracted_portfolio:
-    st.info("👈 Please upload a client's CAS PDF in the sidebar to begin the automated analysis.")
+    st.info("👈 Please upload a client's CAS PDF in the sidebar to begin. (If no PDF, you can still use the Live Search at the bottom).")
 else:
-    st.markdown("### Detected Client Holdings:")
-    for f in st.session_state.extracted_portfolio:
-        st.write(f"- 🏦 {f}")
-    st.markdown("---")
+    with st.expander("View Detected Client Holdings", expanded=False):
+        for f in st.session_state.extracted_portfolio:
+            st.write(f"- 🏦 {f}")
 
 # --- TABS FOR ANALYTICS ---
 tab1, tab2, tab3 = st.tabs(["📊 Portfolio Overlap", "📈 What-If Performance", "🎯 Market-Aware Goal Planner"])
@@ -107,28 +97,43 @@ with tab1:
     
     col1, col2 = st.columns(2)
     with col1:
-        existing_fund = st.selectbox("Select Client's Existing Fund", options=list(client_existing_db.keys()))
+        # FIXED: Now strictly uses the 14+ funds extracted from the PDF
+        if st.session_state.extracted_portfolio:
+            existing_fund = st.selectbox("Select Client's Existing Fund", options=st.session_state.extracted_portfolio)
+        else:
+            existing_fund = st.selectbox("Select Client's Existing Fund", options=["Please upload PDF first"])
+            
     with col2:
-        proposed_fund = st.selectbox("Select Proposed New Fund", options=list(moneyplan_recommended_funds.keys()))
+        # FIXED: Now allows you to select ANY of the 40,000+ funds to compare against
+        proposed_fund = st.selectbox("Select Proposed New Fund", options=all_fund_names)
 
     if st.button("Analyze True Overlap"):
-        dict_existing = client_existing_db.get(existing_fund, {})
-        dict_proposed = moneyplan_recommended_funds.get(proposed_fund, {})
-        
-        total_overlap = 0.0
-        overlapping_stocks = []
-        
-        common_keys = set(dict_existing.keys()).intersection(set(dict_proposed.keys()))
-        for stock in common_keys:
-            overlap_weight = min(dict_existing[stock], dict_proposed[stock])
-            total_overlap += overlap_weight
-            overlapping_stocks.append({"Stock": stock, "Overlap %": overlap_weight})
-        
-        st.metric(label="True Portfolio Overlap", value=f"{total_overlap:.2f}%")
-        if total_overlap < 15:
-            st.success("✅ **SAFE TO INVEST:** Low overlap. This new fund adds true diversification.")
+        if existing_fund == "Please upload PDF first":
+            st.warning("Upload a PDF to analyze actual client holdings.")
         else:
-            st.error("⚠️ **WARNING:** High overlap. Adding this fund duplicates existing risk.")
+            dict_existing, found_existing = get_fund_holdings(existing_fund)
+            dict_proposed, found_proposed = get_fund_holdings(proposed_fund)
+            
+            # Show warnings if we are using placeholder data
+            if not found_existing:
+                st.warning(f"⚠️ We don't have the internal stocks for '{existing_fund}' in our database yet. Using placeholder data.")
+            if not found_proposed:
+                st.warning(f"⚠️ We don't have the internal stocks for '{proposed_fund}' in our database yet. Using placeholder data.")
+            
+            total_overlap = 0.0
+            overlapping_stocks = []
+            
+            common_keys = set(dict_existing.keys()).intersection(set(dict_proposed.keys()))
+            for stock in common_keys:
+                overlap_weight = min(dict_existing[stock], dict_proposed[stock])
+                total_overlap += overlap_weight
+                overlapping_stocks.append({"Stock": stock, "Overlap %": overlap_weight})
+            
+            st.metric(label="True Portfolio Overlap", value=f"{total_overlap:.2f}%")
+            if total_overlap < 15:
+                st.success("✅ **SAFE TO INVEST:** Low overlap. This new fund adds true diversification.")
+            else:
+                st.error("⚠️ **WARNING:** High overlap. Adding this fund duplicates existing risk.")
 
 # ==========================================
 # TAB 2: WHAT-IF PERFORMANCE ENGINE
@@ -142,28 +147,29 @@ with tab2:
     with col_b:
         years_invested = st.slider("Years Invested", 1, 15, 5)
     with col_c:
-        better_alternative = st.selectbox("Alternative Moneyplan Fund", options=list(historical_cagr_db.keys()), index=2)
+        # Uses standard assumptions for demo
+        better_alternative = st.selectbox("Alternative Category", options=["Flexi Cap (Avg 15%)", "Small Cap (Avg 18%)", "Mid Cap (Avg 16%)"])
         
-    actual_fund = st.selectbox("Client's Underperforming Fund", options=list(historical_cagr_db.keys()), index=0)
+    actual_fund = st.selectbox("Underperforming Category", options=["Large Cap (Avg 12%)", "Regular Plan (Avg 11%)", "Debt Fund (Avg 7%)"])
     
     if st.button("Run Alternate Universe Scenario"):
-        actual_rate = historical_cagr_db[actual_fund] / 100
-        alt_rate = historical_cagr_db[better_alternative] / 100
+        # Extract the percentages from the dropdown strings
+        actual_rate = float(actual_fund.split("Avg ")[1].replace("%)", "")) / 100
+        alt_rate = float(better_alternative.split("Avg ")[1].replace("%)", "")) / 100
         
         actual_corpus = invested_amt * ((1 + actual_rate) ** years_invested)
         alt_corpus = invested_amt * ((1 + alt_rate) ** years_invested)
         wealth_lost = alt_corpus - actual_corpus
         
-        st.markdown(f"#### Value of {actual_fund}: **₹{int(actual_corpus):,}**")
+        st.markdown(f"#### Value in {actual_fund}: **₹{int(actual_corpus):,}**")
         st.markdown(f"#### Value if invested in {better_alternative}: **₹{int(alt_corpus):,}**")
-        
-        st.error(f"### Wealth Lost due to poor fund selection: ₹{int(wealth_lost):,}")
+        st.error(f"### Wealth Lost due to poor selection: ₹{int(wealth_lost):,}")
 
 # ==========================================
 # TAB 3: MARKET-AWARE GOAL PLANNER
 # ==========================================
 with tab3:
-    st.markdown("### Dynamic Strategy based on Valuations & PMI")
+    st.markdown("### Dynamic Strategy based on Valuations")
     
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -174,27 +180,21 @@ with tab3:
     with c3:
         market_valuation = st.selectbox("Current Market Valuation (Nifty P/E)", 
                                         ["Undervalued (PE < 18)", "Fair Value (PE 18-22)", "Overvalued (PE > 22)"], index=2)
-        macro_trend = st.selectbox("Manufacturing PMI", ["Expanding (>50)", "Contracting (<50)"])
 
     st.markdown("---")
-    st.markdown("### 📋 Automated Strategy Recommendation")
     
     recommended_rate = 12.0
     if duration < 3:
-        st.warning("**Time Horizon Too Short for Equity.**")
-        st.write("👉 **Action:** 100% allocation to Arbitrage or Liquid Funds. Protect capital.")
+        st.warning("**Action:** 100% allocation to Arbitrage/Liquid Funds.")
         recommended_rate = 7.0
     elif "Overvalued" in market_valuation and duration > 5:
-        st.error("**Market is Overvalued / High Risk.**")
-        st.write("👉 **Action:** Stagger lumpsum investments via a 6-month STP from Liquid to Equity. Route fresh SIPs to Flexi-Cap.")
+        st.error("**Action:** Stagger lumpsum investments via a 6-month STP. Route fresh SIPs to Flexi-Cap.")
         recommended_rate = 11.0
-    elif "Undervalued" in market_valuation and "Expanding" in macro_trend:
-        st.success("**Market is Undervalued with Strong Economic Growth.**")
-        st.write("👉 **Action:** Aggressive deployment. Increase allocation to Mid and Small Cap categories.")
+    elif "Undervalued" in market_valuation:
+        st.success("**Action:** Aggressive deployment. Increase allocation to Mid and Small Cap categories.")
         recommended_rate = 14.0
     else:
-        st.info("**Normal Market Conditions.**")
-        st.write("👉 **Action:** Standard asset allocation based on risk profile. Continue regular SIPs.")
+        st.info("**Action:** Standard asset allocation based on risk profile.")
         
     monthly_rate = (recommended_rate / 100) / 12
     months = duration * 12
@@ -203,7 +203,8 @@ with tab3:
     st.markdown(f"### Required Monthly SIP: **₹{int(required_sip):,}** *(Assuming {recommended_rate}% return)*")
 
 st.markdown("---")
-st.markdown("### 🔍 Live Mutual Fund Search (40,000+ Schemes)")
-selected_fund_live = st.selectbox("Search any active fund in India:", options=all_fund_names)
+st.markdown("### 🔍 Live Mutual Fund Database")
+selected_fund_live = st.selectbox("Search any active fund in India to get its AMFI Scheme Code:", options=all_fund_names)
 if selected_fund_live:
-    st.write(f"**AMFI Scheme Code:** {all_funds_db[selected_fund_live]}")
+    if "Error" not in selected_fund_live:
+        st.write(f"**AMFI Scheme Code:** {all_funds_db[selected_fund_live]}")
