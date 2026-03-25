@@ -11,7 +11,42 @@ st.sidebar.markdown("---")
 
 # --- 1. THE LIVE DATA ENGINE (TIMEOUT INCREASED) ---
 @st.cache_data(ttl=86400)
+def # --- 1. THE LIVE DATA ENGINE (OFFICIAL AMFI SOURCE) ---
+@st.cache_data(ttl=86400) # Updates once every 24 hours
 def get_all_indian_mutual_funds():
+    # Bypassing third-party APIs and pulling the raw daily text file directly from AMFI
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    try:
+        response = requests.get("https://www.amfiindia.com/spages/NAVAll.txt", headers=headers, timeout=15)
+        response.raise_for_status() 
+        
+        fund_dict = {}
+        # The AMFI file is a giant block of text separated by semicolons
+        lines = response.text.split('\n')
+        
+        for line in lines:
+            parts = line.split(';')
+            # Check if the line is an actual fund (starts with a numeric Scheme Code)
+            if len(parts) >= 4 and parts[0].strip().isdigit():
+                scheme_code = parts[0].strip()
+                scheme_name = parts[3].strip()
+                fund_dict[scheme_name] = scheme_code
+                
+        # Sort it alphabetically so it looks clean in your dropdown
+        return dict(sorted(fund_dict.items()))
+        
+    except Exception as e:
+        return {
+            "Error: Cloud server blocked. Use offline CSV method instead.": 0,
+            "Parag Parikh Flexi Cap Fund": 122639,
+            "Nippon India Small Cap Fund": 118778,
+            "Canara Robeco Mid Cap Fund": 147824,
+            "Kotak Midcap Fund": 120152
+        }
+
+with st.spinner("Downloading Official AMFI Database..."):
+    all_funds_db = get_all_indian_mutual_funds()
+    all_fund_names = list(all_funds_db.keys()):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
         # Increased timeout to 30 seconds to handle the massive 40,000+ fund list
