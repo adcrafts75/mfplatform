@@ -62,14 +62,14 @@ with st.spinner("Syncing Live AMFI Database for Scheme Selection..."):
     all_funds_db = get_all_indian_mutual_funds()
     all_fund_names = list(all_funds_db.keys())
 
-# --- INTERNAL MASTER DATABASE (Curated Fundamentals) ---
+# --- INTERNAL MASTER DATABASE (Curated Fundamentals & Historicals) ---
 fund_database = {
-    "Parag Parikh Flexi Cap Fund": {"Alpha": 4.52, "Beta": 0.81, "Sharpe": 1.65},
-    "Nippon India Small Cap Fund": {"Alpha": 7.43, "Beta": 0.92, "Sharpe": 1.88},
-    "Quant Multi Asset Allocation": {"Alpha": 6.67, "Beta": 1.05, "Sharpe": 1.51},
-    "HDFC Balanced Advantage": {"Alpha": 3.85, "Beta": 0.75, "Sharpe": 1.45},
-    "SBI Magnum Midcap": {"Alpha": 5.12, "Beta": 0.88, "Sharpe": 1.55},
-    "ICICI Pru Corporate Bond": {"Alpha": 1.05, "Beta": 0.45, "Sharpe": 0.95},
+    "Parag Parikh Flexi Cap Fund": {"Alpha": 4.52, "Beta": 0.81, "Sharpe": 1.65, "10Y_Return": 19.5},
+    "Nippon India Small Cap Fund": {"Alpha": 7.43, "Beta": 0.92, "Sharpe": 1.88, "10Y_Return": 26.2},
+    "Quant Multi Asset Allocation": {"Alpha": 6.67, "Beta": 1.05, "Sharpe": 1.51, "10Y_Return": 16.8},
+    "HDFC Balanced Advantage": {"Alpha": 3.85, "Beta": 0.75, "Sharpe": 1.45, "10Y_Return": 15.2},
+    "SBI Magnum Midcap": {"Alpha": 5.12, "Beta": 0.88, "Sharpe": 1.55, "10Y_Return": 20.4},
+    "ICICI Pru Corporate Bond": {"Alpha": 1.05, "Beta": 0.45, "Sharpe": 0.95, "10Y_Return": 7.5},
 }
 
 # --- UI TABS ---
@@ -95,7 +95,7 @@ with tab1:
         invest_amount = st.number_input("Total Capital / Monthly SIP (₹)", value=10000, step=1000)
     with col3:
         time_horizon = st.slider("Investment Horizon (Years)", 1, 30, 10)
-        expected_return = st.number_input("Expected Return (%)", value=12.0, step=0.5)
+        expected_return = st.number_input("Client's Target Return (%)", value=12.0, step=0.5)
         
         stp_duration = 0
         if investment_type == "Multi-AMC STP (HNI)":
@@ -115,7 +115,7 @@ with tab1:
     st.progress(int(base_equity))
     st.write(f"**Target Equity:** {int(base_equity)}% | **Target Debt/Gold:** {int(base_debt)}%")
     
-    st.success("👉 **Profile saved! Click on 'Tab 2: Scheme Engine' above to see the specific fund recommendations.**")
+    st.success("👉 **Profile saved! Click on 'Tab 2: Scheme Engine' above to map the schemes and calculate overall performance.**")
 
 # ==========================================
 # TOOL 2: SCHEME ENGINE (Handles both SIP/Lumpsum & STP)
@@ -132,6 +132,7 @@ with tab2:
         
         amc_choices = ["SBI", "HDFC", "ICICI", "Nippon India", "Kotak", "Axis", "Quant", "Parag Parikh", "Mirae Asset", "Tata", "Motilal Oswal", "DSP"]
         stp_configs = []
+        overall_stp_target_cagr = 0
         
         for i in range(num_amcs):
             with st.expander(f"⚙️ AMC Slot {i+1} Configuration (₹{int(per_amc_lumpsum):,})", expanded=True):
@@ -148,12 +149,20 @@ with tab2:
                     source_fund = st.selectbox("Source Fund (Park Lumpsum here):", options=(liquid_guess + amc_funds), key=f"src_{i}")
                 with c_tgt:
                     target_fund = st.selectbox("Target Fund (Transfer Monthly here):", options=(equity_guess + amc_funds), key=f"tgt_{i}")
+                    # Allow advisor to input the historical return of the AMFI fund they just selected
+                    target_cagr = st.number_input("Target Fund's Historical CAGR (%)", value=15.0, step=0.5, key=f"cagr_{i}")
+                    overall_stp_target_cagr += target_cagr
                     
                 stp_configs.append({
                     "amc": selected_amc, "lumpsum": per_amc_lumpsum, "monthly": monthly_stp_per_amc,
-                    "source": source_fund, "target": target_fund
+                    "source": source_fund, "target": target_fund, "target_cagr": target_cagr
                 })
+        
         st.session_state['stp_configs'] = stp_configs
+        st.session_state['overall_stp_cagr'] = overall_stp_target_cagr / num_amcs
+        
+        st.markdown("---")
+        st.markdown(f"### 📊 Overall Expected Target Portfolio CAGR: **{st.session_state['overall_stp_cagr']:.2f}%**")
 
     # --- SCENARIO B: STANDARD SIP & LUMPSUM ---
     else:
@@ -184,14 +193,26 @@ with tab2:
             scheme_recommendations = {"Parag Parikh Flexi Cap Fund": final_equity * 0.6, "SBI Magnum Midcap": final_equity * 0.4, "ICICI Pru Corporate Bond": 100 - final_equity}
             
         st.markdown("#### Curated Scheme Recommendations")
+        weighted_portfolio_return = 0.0
+        
         for fund, pct in scheme_recommendations.items():
             if pct > 0:
-                alloc_amt = (pct / 100) * invest_amount
+                amt = (pct / 100) * invest_amount
                 mode_text = "/ month" if investment_type == "SIP" else ""
-                st.metric(label=f"{fund} ({int(pct)}%)", value=f"₹ {int(alloc_amt):,}{mode_text}")
+                
+                # Fetch historical return and calculate weighted impact
+                hist_return = fund_database.get(fund, {}).get("10Y_Return", 10.0)
+                weighted_portfolio_return += (pct / 100) * hist_return
+                
+                st.metric(label=f"{fund} ({int(pct)}% Alloc.)", value=f"₹ {int(amt):,}{mode_text}", delta=f"{hist_return}% Hist. CAGR")
                 
         st.session_state['standard_configs'] = scheme_recommendations
         st.session_state['nifty_pe'] = nifty_pe
+        st.session_state['weighted_return'] = weighted_portfolio_return
+        
+        st.markdown("---")
+        st.markdown(f"### 📊 Overall Expected Portfolio CAGR: **{weighted_portfolio_return:.2f}%**")
+        st.info("Note: The overall expected return is mathematically derived by calculating the weighted average of the long-term historical performance of the selected schemes.")
 
 # ==========================================
 # TOOL 3: RATIONALE & PDF GENERATOR
@@ -208,13 +229,23 @@ with tab3:
         if len(text) > 75: text = text[:72] + "..."
         return text
 
+    # Standard Disclaimer String
+    disclaimer_text = """STANDARD MUTUAL FUND DISCLAIMERS & TERMS:
+1. Mutual Fund investments are subject to market risks, read all scheme related documents carefully before investing.
+2. Past performance of the schemes is neither an indicator nor a guarantee of future performance.
+3. The 'Overall Expected Portfolio CAGR' is calculated mathematically using weighted historical averages. It is strictly for illustrative planning purposes and does not constitute a promise or guarantee of minimum returns.
+4. Moneyplan Financial Services (Sachin Thorat) is an AMFI Registered Mutual Fund Distributor and earns commissions from Asset Management Companies.
+5. This report is auto-generated based on the client profile provided and does not constitute binding legal or tax advice."""
+
     # --- PDF SCENARIO A: STP ---
     if investment_type == "Multi-AMC STP (HNI)" and 'stp_configs' in st.session_state:
-        rationale = f"""Based on your goal to invest Rs. {int(invest_amount):,}, taking a lumpsum approach into equity carries 'timing risk' given current valuations. We recommend a Multi-AMC Systematic Transfer Plan (STP).
+        overall_cagr = st.session_state.get('overall_stp_cagr', 15.0)
+        rationale = f"""Based on your goal to invest Rs. {int(invest_amount):,} with an expected target return of {expected_return}%, taking a lumpsum approach into equity carries 'timing risk' given current valuations. We recommend a Multi-AMC Systematic Transfer Plan (STP).
 
 1. Capital Protection: Split your Rs. {int(invest_amount):,} across {num_amcs} top-tier AMCs to diversify risk.
 2. Immediate Yield: Funds are parked in low-risk Liquid funds, generating debt-level yields.
-3. Averaging: Over {stp_duration} months, Rs. {int(monthly_stp_per_amc):,} automatically transfers into high-growth Equity funds."""
+3. Averaging: Over {stp_duration} months, Rs. {int(monthly_stp_per_amc):,} automatically transfers into high-growth Equity funds.
+4. Expected Target CAGR: {overall_cagr:.2f}% (Based on Historical Fund Averages)"""
 
         st.info(rationale)
         
@@ -258,15 +289,26 @@ with tab3:
                 pdf.cell(0, 6, sanitize_text(config['source']), ln=True)
                 pdf.cell(0, 6, "TARGET FUND (Equity Destination):", ln=True)
                 pdf.cell(0, 6, sanitize_text(config['target']), ln=True)
-                pdf.cell(0, 6, f"MONTHLY TRANSFER: Rs. {int(config['monthly']):,}", ln=True)
+                pdf.cell(0, 6, f"MONTHLY TRANSFER: Rs. {int(config['monthly']):,} | Target Hist. CAGR: {config['target_cagr']}%", ln=True)
                 pdf.ln(5)
+                
+            # Disclaimers
+            pdf.ln(5)
+            pdf.set_text_color(80, 80, 80)
+            pdf.set_font("Helvetica", '', 8)
+            pdf.multi_cell(0, 4, sanitize_text(disclaimer_text))
+            
+            pdf.ln(5)
+            pdf.set_font("Helvetica", 'B', 10)
+            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor | Nashik & Pune", ln=True)
             return bytes(pdf.output())
 
         st.download_button("📄 Download Multi-AMC STP PDF Report", data=generate_pdf(), file_name=f"{sanitize_text(client_name)}_STP_Plan.pdf", mime="application/pdf")
 
     # --- PDF SCENARIO B: STANDARD SIP/LUMPSUM ---
     elif investment_type in ["SIP", "Lumpsum"] and 'standard_configs' in st.session_state:
-        rationale = f"Based on your {risk_profile} risk profile and {time_horizon}-year horizon, we have constructed a portfolio targeting {int(base_equity)}% Equity. Given the current Nifty valuation (P/E: {st.session_state.get('nifty_pe', 22)}), the engine has selected the following curated schemes to optimize your returns."
+        weighted_ret = st.session_state.get('weighted_return', 12.0)
+        rationale = f"Based on your {risk_profile} risk profile, {time_horizon}-year horizon, and target return of {expected_return}%, we have constructed a portfolio targeting {int(base_equity)}% Equity. \n\nGiven current Nifty valuations (P/E: {st.session_state.get('nifty_pe', 22)}), the engine has selected the curated schemes below. The Overall Expected Portfolio CAGR is {weighted_ret:.2f}%, mathematically derived from the long-term historical averages of the selected funds."
         st.info(rationale)
         
         def generate_pdf():
@@ -286,6 +328,7 @@ with tab3:
             pdf.cell(0, 6, sanitize_text(f"Prepared For: {client_name}"), ln=True)
             mode_text = "Monthly SIP" if investment_type == "SIP" else "Lumpsum Capital"
             pdf.cell(0, 6, f"Total {mode_text}: Rs. {int(invest_amount):,}", ln=True)
+            pdf.cell(0, 6, f"Overall Expected Portfolio CAGR: {weighted_ret:.2f}%", ln=True)
             pdf.ln(8)
             
             pdf.set_font("Helvetica", 'B', 12)
@@ -311,12 +354,16 @@ with tab3:
                     
                     if fund in fund_database:
                         stats = fund_database[fund]
-                        pdf.cell(0, 6, f"Alpha: {stats['Alpha']} | Beta: {stats['Beta']} | Sharpe: {stats['Sharpe']}", ln=True)
+                        pdf.cell(0, 6, f"10-Year Hist. CAGR: {stats['10Y_Return']}% | Alpha: {stats['Alpha']} | Beta: {stats['Beta']}", ln=True)
                     pdf.ln(3)
-                    
-            pdf.ln(10)
-            pdf.set_font("Helvetica", 'B', 11)
-            pdf.cell(0, 6, "Moneyplan Financial Services", ln=True)
+            
+            # Disclaimers
+            pdf.ln(5)
+            pdf.set_text_color(80, 80, 80)
+            pdf.set_font("Helvetica", '', 8)
+            pdf.multi_cell(0, 4, sanitize_text(disclaimer_text))
+            
+            pdf.ln(5)
+            pdf.set_font("Helvetica", 'B', 10)
+            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor | Nashik & Pune", ln=True)
             return bytes(pdf.output())
-
-        st.download_button(f"📄 Download {investment_type} Strategy PDF Report", data=generate_pdf(), file_name=f"{sanitize_text(client_name)}_{investment_type}_Plan.pdf", mime="application/pdf")
