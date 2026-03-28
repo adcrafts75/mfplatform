@@ -46,7 +46,7 @@ st.title("Intelligent Mutual Fund Suggestion Engine")
 def get_all_indian_mutual_funds():
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        response = requests.get("[https://www.amfiindia.com/spages/NAVAll.txt](https://www.amfiindia.com/spages/NAVAll.txt)", headers=headers, timeout=15)
+        response = requests.get("https://www.amfiindia.com/spages/NAVAll.txt", headers=headers, timeout=15)
         response.raise_for_status() 
         fund_dict = {}
         lines = response.text.split('\n')
@@ -144,11 +144,16 @@ with tab2:
                 liquid_guess = [f for f in amc_funds if "liquid" in f.lower() or "arbitrage" in f.lower()]
                 equity_guess = [f for f in amc_funds if "equity" in f.lower() or "flexi" in f.lower() or "midcap" in f.lower() or "small cap" in f.lower()]
                 
+                # THE FIX: Keep smart guesses at the top, but append ALL funds to the bottom so nothing is hidden.
+                # Using dict.fromkeys() removes any duplicates while keeping the smart order.
+                src_options = list(dict.fromkeys(liquid_guess + amc_funds + all_fund_names))
+                tgt_options = list(dict.fromkeys(equity_guess + amc_funds + all_fund_names))
+
                 c_src, c_tgt = st.columns(2)
                 with c_src:
-                    source_fund = st.selectbox("Source Fund (Park Lumpsum here):", options=(liquid_guess + amc_funds), key=f"src_{i}")
+                    source_fund = st.selectbox("Source Fund (Park Lumpsum here):", options=src_options, key=f"src_{i}")
                 with c_tgt:
-                    target_fund = st.selectbox("Target Fund (Transfer Monthly here):", options=(equity_guess + amc_funds), key=f"tgt_{i}")
+                    target_fund = st.selectbox("Target Fund (Transfer Monthly here):", options=tgt_options, key=f"tgt_{i}")
                     target_cagr = st.number_input("Target Fund's Historical CAGR (%)", value=15.0, step=0.5, key=f"cagr_{i}")
                     overall_stp_target_cagr += target_cagr
                     
@@ -354,38 +359,4 @@ with tab3:
             pdf.set_font("Helvetica", 'B', 12)
             pdf.set_fill_color(240, 240, 240)
             pdf.cell(0, 10, " 1. Strategic Rationale", ln=True, fill=True)
-            pdf.set_font("Helvetica", '', 10)
-            pdf.multi_cell(0, 6, clean_paragraph(rationale))
-            pdf.ln(5)
-            
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(0, 10, " 2. Scheme Allocation & Analytics", ln=True, fill=True)
-            pdf.ln(3)
-            
-            for fund, pct in st.session_state['standard_configs'].items():
-                if pct > 0:
-                    amt = (pct / 100) * invest_amount
-                    pdf.set_font("Helvetica", 'B', 11)
-                    pdf.set_text_color(30, 58, 138)
-                    pdf.cell(0, 6, clean_name(fund), ln=True)
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.set_font("Helvetica", '', 10)
-                    pdf.cell(0, 6, f"Allocation: {int(pct)}% (Rs. {int(amt):,})", ln=True)
-                    
-                    if fund in fund_database:
-                        stats = fund_database[fund]
-                        pdf.cell(0, 6, f"10-Year Hist. CAGR: {stats['10Y_Return']}% | Alpha: {stats['Alpha']} | Beta: {stats['Beta']}", ln=True)
-                    pdf.ln(3)
-            
-            # Disclaimers
-            pdf.ln(5)
-            pdf.set_text_color(80, 80, 80)
-            pdf.set_font("Helvetica", '', 8)
-            pdf.multi_cell(0, 4, clean_paragraph(disclaimer_text))
-            
-            pdf.ln(5)
-            pdf.set_font("Helvetica", 'B', 10)
-            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor | Nashik & Pune", ln=True)
-            return bytes(pdf.output())
-
-        st.download_button(f"📄 Download {investment_type} Strategy PDF Report", data=generate_pdf(), file_name=f"{clean_name(client_name)}_{investment_type}_Plan.pdf", mime="application/pdf")
+            pdf.set_font("Helvetica", '', 1
