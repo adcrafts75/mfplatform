@@ -178,7 +178,14 @@ The Strategy:
 
         st.info(rationale)
         
-        # --- PDF GENERATOR ---
+        # --- PDF GENERATOR HELPER ---
+        def sanitize_text(text):
+            if not text: return ""
+            # Replace non-breaking spaces with regular spaces so PDF can wrap lines
+            text = str(text).replace('\xa0', ' ').replace('–', '-').replace('—', '-')
+            # Strip out any remaining unsupported characters
+            return text.encode('latin-1', 'ignore').decode('latin-1')
+
         def generate_stp_pdf():
             pdf = FPDF()
             pdf.add_page()
@@ -196,13 +203,13 @@ The Strategy:
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", '', 11)
             pdf.cell(0, 6, f"Date: {date.today().strftime('%B %d, %Y')}", ln=True)
-            pdf.cell(0, 6, f"Prepared For: {client_name}", ln=True)
+            pdf.cell(0, 6, sanitize_text(f"Prepared For: {client_name}"), ln=True)
             pdf.cell(0, 6, f"Total Capital: Rs. {int(invest_amount):,}", ln=True)
             pdf.cell(0, 6, f"STP Duration: {stp_duration} Months", ln=True)
             pdf.ln(8)
             
             # Rationale 
-            pdf_rationale = rationale.replace(f"Dear {client_name},\n\n", "")
+            pdf_rationale = sanitize_text(rationale.replace(f"Dear {client_name},\n\n", ""))
             
             pdf.set_font("Helvetica", 'B', 12)
             pdf.set_fill_color(240, 240, 240)
@@ -219,12 +226,17 @@ The Strategy:
             for i, config in enumerate(st.session_state['stp_configs']):
                 pdf.set_font("Helvetica", 'B', 11)
                 pdf.set_text_color(30, 58, 138)
-                pdf.cell(0, 8, f"AMC SLOT {i+1}: {config['amc']} (Rs. {int(config['lumpsum']):,})", ln=True)
+                pdf.cell(0, 8, sanitize_text(f"AMC SLOT {i+1}: {config['amc']} (Rs. {int(config['lumpsum']):,})"), ln=True)
                 
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("Helvetica", '', 10)
-                pdf.multi_cell(0, 6, f"SOURCE FUND (Lumpsum Parked Here):\n{config['source']}")
-                pdf.multi_cell(0, 6, f"TARGET FUND (Equity Destination):\n{config['target']}")
+                
+                # Sanitize the AMFI fund names here to prevent the crash
+                safe_src = sanitize_text(config['source'])
+                safe_tgt = sanitize_text(config['target'])
+                
+                pdf.multi_cell(0, 6, f"SOURCE FUND (Lumpsum Parked Here):\n{safe_src}")
+                pdf.multi_cell(0, 6, f"TARGET FUND (Equity Destination):\n{safe_tgt}")
                 pdf.cell(0, 6, f"MONTHLY STP TRANSFER: Rs. {int(config['monthly']):,} per month", ln=True)
                 pdf.ln(5)
                 
@@ -239,7 +251,7 @@ The Strategy:
             
             pdf.set_text_color(120, 120, 120)
             pdf.set_font("Helvetica", 'I', 8)
-            disclaimer = "STANDARD DISCLAIMER: Mutual Fund investments are subject to market risks, read all scheme related documents carefully. Past performance is not indicative of future returns. This document is a strategic advisory plan and does not constitute a binding guarantee of returns."
+            disclaimer = sanitize_text("STANDARD DISCLAIMER: Mutual Fund investments are subject to market risks, read all scheme related documents carefully. Past performance is not indicative of future returns. This document is a strategic advisory plan and does not constitute a binding guarantee of returns.")
             pdf.multi_cell(0, 4, disclaimer)
             
             return bytes(pdf.output())
@@ -248,7 +260,7 @@ The Strategy:
         st.download_button(
             label="📄 Download Official Multi-AMC STP PDF Report",
             data=generate_stp_pdf(),
-            file_name=f"{client_name.replace(' ', '_')}_Multi_AMC_STP_Plan.pdf",
+            file_name=f"{sanitize_text(client_name).replace(' ', '_')}_Multi_AMC_STP_Plan.pdf",
             mime="application/pdf"
         )
     else:
