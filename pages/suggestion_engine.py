@@ -156,4 +156,4 @@ with tab2:
                 })
                 
         # Save to session state for the PDF generator
-        st.session_
+        st.session_state['stp_configs'] = stp_configs
