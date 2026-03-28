@@ -46,7 +46,7 @@ st.title("Intelligent Mutual Fund Suggestion Engine")
 def get_all_indian_mutual_funds():
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        response = requests.get("https://www.amfiindia.com/spages/NAVAll.txt", headers=headers, timeout=15)
+        response = requests.get("[https://www.amfiindia.com/spages/NAVAll.txt](https://www.amfiindia.com/spages/NAVAll.txt)", headers=headers, timeout=15)
         response.raise_for_status() 
         fund_dict = {}
         lines = response.text.split('\n')
@@ -144,8 +144,6 @@ with tab2:
                 liquid_guess = [f for f in amc_funds if "liquid" in f.lower() or "arbitrage" in f.lower()]
                 equity_guess = [f for f in amc_funds if "equity" in f.lower() or "flexi" in f.lower() or "midcap" in f.lower() or "small cap" in f.lower()]
                 
-                # THE FIX: Keep smart guesses at the top, but append ALL funds to the bottom so nothing is hidden.
-                # Using dict.fromkeys() removes any duplicates while keeping the smart order.
                 src_options = list(dict.fromkeys(liquid_guess + amc_funds + all_fund_names))
                 tgt_options = list(dict.fromkeys(equity_guess + amc_funds + all_fund_names))
 
@@ -226,7 +224,6 @@ with tab3:
     
     # Text Cleaners
     def clean_paragraph(text):
-        """Removes weird web characters but keeps the paragraph intact for wrapping."""
         if not text: return ""
         text = str(text)
         text = re.sub(r'[^\x20-\x7E]', ' ', text)
@@ -234,7 +231,6 @@ with tab3:
         return text
 
     def clean_name(text):
-        """Hard truncates ONLY the mutual fund names to prevent FPDF crash."""
         text = clean_paragraph(text)
         if len(text) > 75: text = text[:72] + "..."
         return text
@@ -261,7 +257,7 @@ with tab3:
         
         def generate_pdf():
             pdf = FPDF()
-            pdf.set_auto_page_break(auto=True, margin=15) # Ensures long text wraps to next page
+            pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
             
             pdf.set_font("Helvetica", 'B', 16)
@@ -279,9 +275,8 @@ with tab3:
             pdf.cell(0, 6, f"Total Capital: Rs. {int(invest_amount):,}", ln=True)
             pdf.cell(0, 6, f"STP Duration: {stp_duration} Months", ln=True)
             
-            # Dedicated Highlight for Overall Return
             pdf.set_font("Helvetica", 'B', 11)
-            pdf.set_text_color(16, 185, 129) # Green color
+            pdf.set_text_color(16, 185, 129)
             pdf.cell(0, 8, f"Overall Expected Portfolio CAGR: {overall_cagr:.2f}%", ln=True)
             pdf.ln(4)
             
@@ -310,7 +305,6 @@ with tab3:
                 pdf.cell(0, 6, f"MONTHLY TRANSFER: Rs. {int(config['monthly']):,} | Target Hist. CAGR: {config['target_cagr']}%", ln=True)
                 pdf.ln(5)
                 
-            # Disclaimers
             pdf.ln(5)
             pdf.set_text_color(80, 80, 80)
             pdf.set_font("Helvetica", '', 8)
@@ -318,7 +312,7 @@ with tab3:
             
             pdf.ln(5)
             pdf.set_font("Helvetica", 'B', 10)
-            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor | Nashik & Pune", ln=True)
+            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor", ln=True)
             return bytes(pdf.output())
 
         st.download_button("📄 Download Multi-AMC STP PDF Report", data=generate_pdf(), file_name=f"{clean_name(client_name)}_STP_Plan.pdf", mime="application/pdf")
@@ -349,9 +343,8 @@ with tab3:
             mode_text = "Monthly SIP" if investment_type == "SIP" else "Lumpsum Capital"
             pdf.cell(0, 6, f"Total {mode_text}: Rs. {int(invest_amount):,}", ln=True)
             
-            # Dedicated Highlight for Overall Return
             pdf.set_font("Helvetica", 'B', 12)
-            pdf.set_text_color(16, 185, 129) # Green Color
+            pdf.set_text_color(16, 185, 129)
             pdf.cell(0, 8, f"Overall Expected Portfolio CAGR: {weighted_ret:.2f}%", ln=True)
             pdf.ln(4)
             
@@ -359,4 +352,37 @@ with tab3:
             pdf.set_font("Helvetica", 'B', 12)
             pdf.set_fill_color(240, 240, 240)
             pdf.cell(0, 10, " 1. Strategic Rationale", ln=True, fill=True)
-            pdf.set_font("Helvetica", '', 1
+            pdf.set_font("Helvetica", '', 10)
+            pdf.multi_cell(0, 6, clean_paragraph(rationale))
+            pdf.ln(5)
+            
+            pdf.set_font("Helvetica", 'B', 12)
+            pdf.cell(0, 10, " 2. Scheme Allocation & Analytics", ln=True, fill=True)
+            pdf.ln(3)
+            
+            for fund, pct in st.session_state['standard_configs'].items():
+                if pct > 0:
+                    amt = (pct / 100) * invest_amount
+                    pdf.set_font("Helvetica", 'B', 11)
+                    pdf.set_text_color(30, 58, 138)
+                    pdf.cell(0, 6, clean_name(fund), ln=True)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font("Helvetica", '', 10)
+                    pdf.cell(0, 6, f"Allocation: {int(pct)}% (Rs. {int(amt):,})", ln=True)
+                    
+                    if fund in fund_database:
+                        stats = fund_database[fund]
+                        pdf.cell(0, 6, f"10-Year Hist. CAGR: {stats['10Y_Return']}% | Alpha: {stats['Alpha']} | Beta: {stats['Beta']}", ln=True)
+                    pdf.ln(3)
+            
+            pdf.ln(5)
+            pdf.set_text_color(80, 80, 80)
+            pdf.set_font("Helvetica", '', 8)
+            pdf.multi_cell(0, 4, clean_paragraph(disclaimer_text))
+            
+            pdf.ln(5)
+            pdf.set_font("Helvetica", 'B', 10)
+            pdf.cell(0, 6, "Moneyplan Financial Services | AMFI Registered Mutual Fund Distributor", ln=True)
+            return bytes(pdf.output())
+
+        st.download_button(f"📄 Download {investment_type} Strategy PDF Report", data=generate_pdf(), file_name=f"{clean_name(client_name)}_{investment_type}_Plan.pdf", mime="application/pdf")
