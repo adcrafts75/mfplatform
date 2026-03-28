@@ -41,24 +41,37 @@ st.sidebar.markdown("---")
 
 st.title("Intelligent Mutual Fund Suggestion Engine")
 
-# --- FETCH ALL 40,000+ AMFI SCHEMES ---
+# --- FETCH ALL 40,000+ AMFI SCHEMES (UPDATED TO OPEN API) ---
 @st.cache_data(ttl=86400)
 def get_all_indian_mutual_funds():
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        response = requests.get("[https://www.amfiindia.com/spages/NAVAll.txt](https://www.amfiindia.com/spages/NAVAll.txt)", headers=headers, timeout=15)
+        # Switching from AMFI direct site to a Developer-Friendly Open API
+        response = requests.get("https://api.mfapi.in/mf", timeout=15)
         response.raise_for_status() 
+        data = response.json()
+        
         fund_dict = {}
-        lines = response.text.split('\n')
-        for line in lines:
-            parts = line.split(';')
-            if len(parts) >= 4 and parts[0].strip().isdigit():
-                fund_dict[parts[3].strip()] = parts[0].strip()
+        for item in data:
+            fund_dict[item['schemeName']] = item['schemeCode']
+            
         return dict(sorted(fund_dict.items()))
     except Exception as e:
-        return {"Error: Cloud server blocked.": 0, "SBI Liquid Fund": 1, "Parag Parikh Flexi Cap Fund": 2}
+        # Robust fallback list just in case the API ever has downtime
+        return {
+            "Fallback Mode: Live Sync Failed": 0,
+            "SBI Liquid Fund - Regular Growth": 1,
+            "HDFC Liquid Fund - Regular Growth": 2,
+            "ICICI Prudential Liquid Fund - Growth": 3,
+            "Nippon India Liquid Fund - Growth": 4,
+            "Parag Parikh Flexi Cap Fund - Regular Growth": 5,
+            "SBI Magnum Midcap Fund - Regular Growth": 6,
+            "HDFC Balanced Advantage Fund - Regular Growth": 7,
+            "Quant Multi Asset Allocation Fund - Regular Growth": 8,
+            "Nippon India Small Cap Fund - Regular Growth": 9,
+            "ICICI Pru Corporate Bond Fund - Regular Growth": 10
+        }
 
-with st.spinner("Syncing Live AMFI Database for Scheme Selection..."):
+with st.spinner("Syncing Live Scheme Database..."):
     all_funds_db = get_all_indian_mutual_funds()
     all_fund_names = list(all_funds_db.keys())
 
