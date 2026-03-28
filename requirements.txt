@@ -3,3 +3,4 @@ pandas
 pdfplumber
 requests
 fpdf2
+numpy-financial
