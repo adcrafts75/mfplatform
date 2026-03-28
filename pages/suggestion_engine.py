@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import re
 from fpdf import FPDF
 from datetime import date
 
@@ -178,13 +179,16 @@ The Strategy:
 
         st.info(rationale)
         
-        # --- PDF GENERATOR HELPER ---
+        # --- BULLETPROOF PDF TEXT SANITIZER ---
         def sanitize_text(text):
             if not text: return ""
-            # Replace non-breaking spaces with regular spaces so PDF can wrap lines
-            text = str(text).replace('\xa0', ' ').replace('–', '-').replace('—', '-')
-            # Strip out any remaining unsupported characters
-            return text.encode('latin-1', 'ignore').decode('latin-1')
+            text = str(text)
+            # 1. Replace anything that is NOT a standard, printable ASCII character with a space.
+            # This guarantees that weird web-symbols and non-breaking spaces become normal spaces.
+            text = re.sub(r'[^\x20-\x7E]', ' ', text)
+            # 2. Collapse multiple spaces into a single space so it looks clean.
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text
 
         def generate_stp_pdf():
             pdf = FPDF()
@@ -231,7 +235,7 @@ The Strategy:
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("Helvetica", '', 10)
                 
-                # Sanitize the AMFI fund names here to prevent the crash
+                # Sanitize the AMFI fund names here to completely prevent the word-wrap crash
                 safe_src = sanitize_text(config['source'])
                 safe_tgt = sanitize_text(config['target'])
                 
