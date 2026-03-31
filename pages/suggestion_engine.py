@@ -41,38 +41,62 @@ st.sidebar.markdown("---")
 
 st.title("Intelligent Mutual Fund Suggestion Engine")
 
-# --- FETCH ALL 40,000+ AMFI SCHEMES (UPDATED TO OPEN API) ---
+# --- TRIPLE-ENGINE LIVE DATA FETCHER (WITH CACHE BUSTER) ---
+# Renamed function to force Streamlit to forget the old broken cache
 @st.cache_data(ttl=86400)
-def get_all_indian_mutual_funds():
+def sync_mutual_fund_database_v3():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
+    }
+    
+    # Engine 1: The Open API (Added Headers this time)
     try:
-        # Switching from AMFI direct site to a Developer-Friendly Open API
-        response = requests.get("https://api.mfapi.in/mf", timeout=15)
-        response.raise_for_status() 
-        data = response.json()
-        
-        fund_dict = {}
-        for item in data:
-            fund_dict[item['schemeName']] = item['schemeCode']
-            
-        return dict(sorted(fund_dict.items()))
-    except Exception as e:
-        # Robust fallback list just in case the API ever has downtime
-        return {
-            "Fallback Mode: Live Sync Failed": 0,
-            "SBI Liquid Fund - Regular Growth": 1,
-            "HDFC Liquid Fund - Regular Growth": 2,
-            "ICICI Prudential Liquid Fund - Growth": 3,
-            "Nippon India Liquid Fund - Growth": 4,
-            "Parag Parikh Flexi Cap Fund - Regular Growth": 5,
-            "SBI Magnum Midcap Fund - Regular Growth": 6,
-            "HDFC Balanced Advantage Fund - Regular Growth": 7,
-            "Quant Multi Asset Allocation Fund - Regular Growth": 8,
-            "Nippon India Small Cap Fund - Regular Growth": 9,
-            "ICICI Pru Corporate Bond Fund - Regular Growth": 10
-        }
+        resp1 = requests.get("https://api.mfapi.in/mf", headers=headers, timeout=10)
+        if resp1.status_code == 200:
+            data = resp1.json()
+            if len(data) > 1000:
+                fund_dict = {str(item['schemeName']): str(item['schemeCode']) for item in data}
+                return dict(sorted(fund_dict.items()))
+    except Exception: pass
 
-with st.spinner("Syncing Live Scheme Database..."):
-    all_funds_db = get_all_indian_mutual_funds()
+    # Engine 2: Direct AMFI Download
+    try:
+        resp2 = requests.get("https://www.amfiindia.com/spages/NAVAll.txt", headers=headers, timeout=10)
+        if resp2.status_code == 200 and "Scheme Name" in resp2.text:
+            fund_dict = {}
+            for line in resp2.text.split('\n'):
+                parts = line.split(';')
+                if len(parts) >= 4 and parts[0].strip().isdigit():
+                    fund_dict[parts[3].strip()] = parts[0].strip()
+            if len(fund_dict) > 1000:
+                return dict(sorted(fund_dict.items()))
+    except Exception: pass
+
+    # Engine 3: Anonymous Proxy Route (Ultimate Fallback)
+    try:
+        resp3 = requests.get("https://api.allorigins.win/raw?url=https://www.amfiindia.com/spages/NAVAll.txt", timeout=15)
+        if resp3.status_code == 200:
+            fund_dict = {}
+            for line in resp3.text.split('\n'):
+                parts = line.split(';')
+                if len(parts) >= 4 and parts[0].strip().isdigit():
+                    fund_dict[parts[3].strip()] = parts[0].strip()
+            if len(fund_dict) > 1000:
+                return dict(sorted(fund_dict.items()))
+    except Exception: pass
+
+    return {
+        "⚠️ Error: ALL Cloud Servers Blocked. Try locally.": 0,
+        "SBI Liquid Fund - Regular Growth": 1,
+        "HDFC Liquid Fund - Regular Growth": 2,
+        "Parag Parikh Flexi Cap Fund - Regular Growth": 3,
+        "Nippon India Small Cap Fund - Growth": 4,
+        "Quant Multi Asset Allocation Fund": 5
+    }
+
+with st.spinner("Syncing Live AMFI Database for Scheme Selection..."):
+    all_funds_db = sync_mutual_fund_database_v3()
     all_fund_names = list(all_funds_db.keys())
 
 # --- INTERNAL MASTER DATABASE (Curated Fundamentals & Historicals) ---
@@ -84,6 +108,18 @@ fund_database = {
     "SBI Magnum Midcap": {"Alpha": 5.12, "Beta": 0.88, "Sharpe": 1.55, "10Y_Return": 20.4},
     "ICICI Pru Corporate Bond": {"Alpha": 1.05, "Beta": 0.45, "Sharpe": 0.95, "10Y_Return": 7.5},
 }
+
+# --- LIST MERGER TOOL ---
+def safe_merge_lists(*lists):
+    """Merges lists securely while removing duplicates and keeping order"""
+    merged = []
+    seen = set()
+    for lst in lists:
+        for item in lst:
+            if item not in seen:
+                seen.add(item)
+                merged.append(item)
+    return merged
 
 # --- UI TABS ---
 tab1, tab2, tab3 = st.tabs([
@@ -134,7 +170,6 @@ with tab1:
 # TOOL 2: SCHEME ENGINE (Handles both SIP/Lumpsum & STP)
 # ==========================================
 with tab2:
-    # --- SCENARIO A: MULTI-AMC STP ---
     if investment_type == "Multi-AMC STP (HNI)":
         st.markdown("### 🏛️ Multi-AMC STP Configurator")
         num_amcs = st.slider("Number of AMCs to split across:", 1, 5, 3)
@@ -157,8 +192,9 @@ with tab2:
                 liquid_guess = [f for f in amc_funds if "liquid" in f.lower() or "arbitrage" in f.lower()]
                 equity_guess = [f for f in amc_funds if "equity" in f.lower() or "flexi" in f.lower() or "midcap" in f.lower() or "small cap" in f.lower()]
                 
-                src_options = list(dict.fromkeys(liquid_guess + amc_funds + all_fund_names))
-                tgt_options = list(dict.fromkeys(equity_guess + amc_funds + all_fund_names))
+                # Full Database loaded securely
+                src_options = safe_merge_lists(liquid_guess, amc_funds, all_fund_names)
+                tgt_options = safe_merge_lists(equity_guess, amc_funds, all_fund_names)
 
                 c_src, c_tgt = st.columns(2)
                 with c_src:
@@ -179,7 +215,6 @@ with tab2:
         st.markdown("---")
         st.markdown(f"### 📊 Overall Expected Target Portfolio CAGR: **{st.session_state['overall_stp_cagr']:.2f}%**")
 
-    # --- SCENARIO B: STANDARD SIP & LUMPSUM ---
     else:
         st.markdown("### 📈 Macro-Adjusted Scheme Selection")
         st.write("Adjusts the baseline allocation using current Nifty Valuations.")
@@ -215,7 +250,6 @@ with tab2:
                 amt = (pct / 100) * invest_amount
                 mode_text = "/ month" if investment_type == "SIP" else ""
                 
-                # Fetch historical return and calculate weighted impact
                 hist_return = fund_database.get(fund, {}).get("10Y_Return", 10.0)
                 weighted_portfolio_return += (pct / 100) * hist_return
                 
@@ -235,7 +269,6 @@ with tab2:
 with tab3:
     st.markdown("### Client Presentation & Automated PDF")
     
-    # Text Cleaners
     def clean_paragraph(text):
         if not text: return ""
         text = str(text)
@@ -248,7 +281,6 @@ with tab3:
         if len(text) > 75: text = text[:72] + "..."
         return text
 
-    # Standard Disclaimer String
     disclaimer_text = """STANDARD MUTUAL FUND DISCLAIMERS & TERMS:
 1. Mutual Fund investments are subject to market risks, read all scheme related documents carefully before investing.
 2. Past performance of the schemes is neither an indicator nor a guarantee of future performance.
@@ -256,7 +288,6 @@ with tab3:
 4. Moneyplan Financial Services (Sachin Thorat) is an AMFI Registered Mutual Fund Distributor and earns commissions from Asset Management Companies.
 5. This report is auto-generated based on the client profile provided and does not constitute binding legal or tax advice."""
 
-    # --- PDF SCENARIO A: STP ---
     if investment_type == "Multi-AMC STP (HNI)" and 'stp_configs' in st.session_state:
         overall_cagr = st.session_state.get('overall_stp_cagr', 15.0)
         rationale = f"""Based on your goal to invest Rs. {int(invest_amount):,} with an expected target return of {expected_return}%, taking a lumpsum approach into equity carries 'timing risk' given current valuations. We recommend a Multi-AMC Systematic Transfer Plan (STP).
@@ -330,7 +361,6 @@ with tab3:
 
         st.download_button("📄 Download Multi-AMC STP PDF Report", data=generate_pdf(), file_name=f"{clean_name(client_name)}_STP_Plan.pdf", mime="application/pdf")
 
-    # --- PDF SCENARIO B: STANDARD SIP/LUMPSUM ---
     elif investment_type in ["SIP", "Lumpsum"] and 'standard_configs' in st.session_state:
         weighted_ret = st.session_state.get('weighted_return', 12.0)
         rationale = f"Based on your {risk_profile} risk profile, {time_horizon}-year horizon, and target return of {expected_return}%, we have constructed a portfolio targeting {int(base_equity)}% Equity. \n\nGiven current Nifty valuations (P/E: {st.session_state.get('nifty_pe', 22)}), the engine has selected the curated schemes below. The Overall Expected Portfolio CAGR is {weighted_ret:.2f}%, mathematically derived from the long-term historical averages of the selected funds."
