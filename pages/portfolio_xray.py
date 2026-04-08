@@ -168,8 +168,9 @@ if uploaded_file is not None:
         portfolio_df["Advisor Action"] = recommendations
         portfolio_df["Rationale"] = action_reasons
         
+        # THE FIX: Changed 'applymap' to 'map' to support the newest Pandas version
         st.dataframe(
-            portfolio_df.style.applymap(
+            portfolio_df.style.map(
                 lambda x: 'background-color: #ffebee; color: #c62828' if 'EXIT' in str(x) else 
                           'background-color: #e8f5e9; color: #2e7d32' if 'HOLD' in str(x) else 
                           'background-color: #fff3e0; color: #ef6c00' if 'REVIEW' in str(x) else '',
